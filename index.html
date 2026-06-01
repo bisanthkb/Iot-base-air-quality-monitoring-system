@@ -1,0 +1,957 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+  <title>Air Monitoring System · FISAT Command</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;700&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+
+  <style>
+    :root { --transition-theme: background 0.4s ease, color 0.4s ease, border-color 0.4s ease; }
+
+    [data-theme="dark"] {
+      --bg:           #060a10;
+      --bg2:          #0c1220;
+      --panel:        rgba(10, 18, 32, 0.88);
+      --panel-solid:  #0a1220;
+      --border:       rgba(0, 200, 255, 0.12);
+      --border-hi:    rgba(0, 200, 255, 0.35);
+      --cyan:         #00c8ff;
+      --cyan-dim:     rgba(0, 200, 255, 0.15);
+      --amber:        #f59e0b;
+      --red:          #ef4444;
+      --green:        #10b981;
+      --text:         #c8d8e8;
+      --text-dim:     #4a6078;
+      --text-hi:      #eaf4ff;
+      --glow-c:       0 0 20px rgba(0,200,255,0.4);
+      --table-alt:    rgba(0,200,255,0.025);
+      --scrollbar:    rgba(0,200,255,0.2);
+      --overlay-bg:   rgba(0,0,0,0.72);
+      --header-bg:    rgba(6,10,16,0.97);
+      --modal-bg:     #0c1828;
+      --shadow-soft:  0 4px 32px rgba(0,0,0,0.5);
+    }
+
+    [data-theme="light"] {
+      --bg:           #f0f5fa;
+      --bg2:          #e2ecf5;
+      --panel:        rgba(255,255,255,0.92);
+      --panel-solid:  #ffffff;
+      --border:       rgba(0, 120, 180, 0.18);
+      --border-hi:    rgba(0, 120, 180, 0.45);
+      --cyan:         #0078b4;
+      --cyan-dim:     rgba(0, 120, 180, 0.12);
+      --amber:        #c47f00;
+      --red:          #c0392b;
+      --green:        #0a8c5e;
+      --text:         #2a3d52;
+      --text-dim:     #7a92a8;
+      --text-hi:      #0d1f30;
+      --glow-c:       0 0 14px rgba(0,120,180,0.25);
+      --table-alt:    rgba(0,120,180,0.04);
+      --scrollbar:    rgba(0,120,180,0.2);
+      --overlay-bg:   rgba(200,220,240,0.72);
+      --header-bg:    rgba(240,245,250,0.97);
+      --modal-bg:     #ffffff;
+      --shadow-soft:  0 4px 32px rgba(0,0,0,0.10);
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 16px;
+      overflow-x: hidden;
+      transition: background 0.4s ease, color 0.4s ease;
+    }
+
+    #grid-canvas {
+      position: fixed; inset: 0; z-index: 0;
+      pointer-events: none; opacity: 0.35; transition: opacity 0.5s;
+    }
+    [data-theme="light"] #grid-canvas { opacity: 0.09; }
+
+    body::after {
+      content: ''; position: fixed; inset: 0; z-index: 1; pointer-events: none;
+      background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.06) 2px, rgba(0,0,0,0.06) 4px);
+    }
+    [data-theme="light"] body::after { opacity: 0.25; }
+
+    body::before {
+      content: ''; position: fixed; inset: -50%; z-index: 1; pointer-events: none;
+      width: 200%; height: 200%;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+      opacity: 0.4;
+    }
+    [data-theme="light"] body::before { opacity: 0.12; }
+
+    /* BOOT */
+    #boot {
+      position: fixed; inset: 0; z-index: 9999; background: #000;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px;
+      transition: opacity 0.8s ease;
+    }
+    #boot.out { opacity: 0; pointer-events: none; }
+    #boot-logo {
+      font-family: 'Syne', sans-serif;
+      font-size: clamp(1.2rem, 3.5vw, 2.2rem); font-weight: 800;
+      color: #00c8ff; letter-spacing: 0.02em;
+      text-shadow: 0 0 30px rgba(0,200,255,0.5);
+      text-align: center; line-height: 1.3;
+    }
+    #boot-logo span {
+      display: block; font-size: 0.44em; letter-spacing: 0.3em;
+      color: rgba(0,200,255,0.5); font-weight: 600; margin-top: 6px;
+    }
+    #boot-log { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: rgba(0,200,255,0.55); width: 390px; max-width: 92vw; line-height: 1.9; }
+    .boot-bar-wrap { width: 390px; max-width: 92vw; height: 2px; background: rgba(0,200,255,0.12); border-radius: 2px; overflow: hidden; }
+    #boot-bar { height: 100%; width: 0%; background: #00c8ff; box-shadow: 0 0 16px rgba(0,200,255,0.6); transition: width 0.15s ease; }
+
+    /* APP */
+    #app {
+      position: relative; z-index: 2; min-height: 100vh;
+      display: grid; grid-template-rows: auto 1fr auto;
+      padding: 20px 24px 16px; gap: 20px;
+      max-width: 1640px; margin: 0 auto;
+      opacity: 0; transition: opacity 0.6s ease 0.2s;
+    }
+    #app.visible { opacity: 1; }
+
+    /* HEADER */
+    header {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 16px; flex-wrap: wrap; padding-bottom: 16px;
+      border-bottom: 1px solid var(--border); transition: border-color 0.4s;
+    }
+    .logo-group { display: flex; align-items: center; gap: 14px; }
+    .logo-icon {
+      width: 42px; height: 42px; border: 1.5px solid var(--border-hi); border-radius: 6px;
+      display: flex; align-items: center; justify-content: center;
+      background: var(--cyan-dim); flex-shrink: 0; transition: background 0.4s, border-color 0.4s;
+    }
+    .logo-icon svg { width: 22px; height: 22px; }
+    .logo { font-family: 'Syne', sans-serif; font-size: 1.2rem; font-weight: 800; color: var(--text-hi); letter-spacing: 0.01em; transition: color 0.4s; }
+    .logo em { color: var(--cyan); font-style: normal; }
+    .logo-sub { font-family: 'JetBrains Mono', monospace; font-size: 9.5px; color: var(--text-dim); letter-spacing: 0.22em; text-transform: uppercase; margin-top: 3px; transition: color 0.4s; }
+
+    .header-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+    .theme-btn {
+      width: 36px; height: 36px; border-radius: 50%;
+      border: 1px solid var(--border); background: var(--panel);
+      color: var(--cyan); cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: all 0.25s ease; font-size: 15px;
+    }
+    .theme-btn:hover { border-color: var(--border-hi); background: var(--cyan-dim); }
+
+    .status-pill {
+      display: flex; align-items: center; gap: 8px; padding: 6px 14px;
+      border: 1px solid var(--border); border-radius: 100px; background: var(--panel);
+      font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text-dim); letter-spacing: 0.1em;
+      transition: background 0.4s, border-color 0.4s;
+    }
+    .pulse-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--red); position: relative; }
+    .pulse-dot.live { background: var(--green); }
+    .pulse-dot.live::after {
+      content: ''; position: absolute; inset: -3px; border-radius: 50%;
+      background: var(--green); opacity: 0.4; animation: pulse-ring 1.5s ease-out infinite;
+    }
+    @keyframes pulse-ring { 0% { transform: scale(1); opacity: 0.5; } 100% { transform: scale(2.5); opacity: 0; } }
+
+    .datetime { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-dim); text-align: right; line-height: 1.6; transition: color 0.4s; }
+    #live-clock { color: var(--cyan); font-size: 13px; font-weight: 700; }
+
+    /* MAIN GRID */
+    .main-grid { display: grid; grid-template-columns: 308px 1fr; grid-template-rows: auto auto 1fr; gap: 16px; }
+    @media (max-width: 1100px) { .main-grid { grid-template-columns: 1fr; } }
+
+    /* PANEL */
+    .panel {
+      background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+      position: relative; overflow: hidden;
+      transition: border-color 0.3s ease, background 0.4s ease, box-shadow 0.3s ease;
+    }
+    .panel::before {
+      content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px;
+      background: linear-gradient(90deg, transparent, var(--cyan), transparent);
+      opacity: 0; transition: opacity 0.3s ease;
+    }
+    .panel:hover { border-color: var(--border-hi); box-shadow: var(--shadow-soft); }
+    .panel:hover::before { opacity: 1; }
+
+    .panel-corner { position: absolute; width: 9px; height: 9px; border-color: var(--cyan); border-style: solid; opacity: 0.45; }
+    .panel-corner.tl { top:0; left:0;   border-width: 1px 0 0 1px; }
+    .panel-corner.tr { top:0; right:0;  border-width: 1px 1px 0 0; }
+    .panel-corner.bl { bottom:0; left:0;  border-width: 0 0 1px 1px; }
+    .panel-corner.br { bottom:0; right:0; border-width: 0 1px 1px 0; }
+
+    .panel-label {
+      font-family: 'JetBrains Mono', monospace; font-size: 9.5px; letter-spacing: 0.22em;
+      text-transform: uppercase; color: var(--text-dim); padding: 12px 16px 0;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .panel-label::before { content: ''; width: 3px; height: 3px; background: var(--cyan); border-radius: 50%; box-shadow: var(--glow-c); flex-shrink: 0; }
+
+    /* LEFT COL */
+    .left-col { display: flex; flex-direction: column; gap: 16px; grid-row: 1 / 4; }
+    @media (max-width: 1100px) { .left-col { grid-row: auto; } }
+
+    /* SENSOR CARD */
+    .sensor-card { padding: 16px 20px 20px; position: relative; }
+    .sensor-value-row { display: flex; align-items: flex-end; gap: 8px; margin: 8px 0 4px; }
+    .sensor-value {
+      font-family: 'Syne', sans-serif; font-size: 2.8rem; font-weight: 700; line-height: 1;
+      transition: color 0.4s ease, text-shadow 0.4s ease; letter-spacing: -0.02em;
+    }
+    .sensor-unit { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--text-dim); margin-bottom: 6px; }
+    .sensor-bar-wrap { height: 3px; background: rgba(255,255,255,0.06); border-radius: 2px; overflow: hidden; margin: 10px 0 12px; }
+    [data-theme="light"] .sensor-bar-wrap { background: rgba(0,0,0,0.08); }
+    .sensor-bar { height: 100%; border-radius: 2px; width: 0%; transition: width 1s cubic-bezier(0.22, 1, 0.36, 1), background 0.4s ease; }
+
+    .status-tag {
+      display: inline-flex; align-items: center; gap: 5px;
+      font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: 0.2em; text-transform: uppercase;
+      padding: 4px 10px; border-radius: 2px; font-weight: 700;
+    }
+    .status-tag.optimal  { background: rgba(16,185,129,0.12); color: var(--green); border: 1px solid rgba(16,185,129,0.25); }
+    .status-tag.warning  { background: rgba(245,158,11,0.12);  color: var(--amber); border: 1px solid rgba(245,158,11,0.25); }
+    .status-tag.critical { background: rgba(239,68,68,0.12);   color: var(--red);   border: 1px solid rgba(239,68,68,0.25); }
+
+    .sensor-ring-wrap { position: absolute; top: 16px; right: 16px; width: 48px; height: 48px; }
+    .sensor-ring-wrap svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+    .ring-track { fill: none; stroke: rgba(255,255,255,0.05); stroke-width: 3; }
+    [data-theme="light"] .ring-track { stroke: rgba(0,0,0,0.08); }
+    .ring-fill { fill: none; stroke-width: 3; stroke-linecap: round; stroke-dasharray: 126; stroke-dashoffset: 126; transition: stroke-dashoffset 1.2s cubic-bezier(0.22,1,0.36,1), stroke 0.4s ease; }
+
+    .sensor-meta { display: flex; align-items: center; gap: 12px; margin-top: 8px; flex-wrap: wrap; }
+    .sensor-reading-detail { font-family: 'JetBrains Mono', monospace; font-size: 9px; color: var(--text-dim); letter-spacing: 0.08em; }
+    .sensor-reading-detail strong { color: var(--text); }
+
+    /* GPS */
+    .gps-card { padding: 16px 20px 18px; }
+    .gps-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 10px; }
+    .gps-item-label { font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: 0.2em; color: var(--text-dim); text-transform: uppercase; margin-bottom: 3px; }
+    .gps-item-value { font-family: 'JetBrains Mono', monospace; font-size: 12.5px; color: var(--text-hi); font-weight: 400; transition: color 0.4s; }
+
+    /* CHART */
+    .chart-panel { padding: 16px 20px 18px; }
+    .chart-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; flex-wrap: wrap; gap: 10px; }
+    .chart-legend { display: flex; gap: 14px; font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: 0.1em; color: var(--text-dim); }
+    .legend-item { display: flex; align-items: center; gap: 6px; }
+    .legend-dot  { width: 6px; height: 6px; border-radius: 50%; }
+    .chart-wrap  { height: 200px; }
+
+    .chart-type-pills { display: flex; gap: 5px; }
+    .chart-pill {
+      font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase;
+      padding: 4px 10px; border-radius: 2px; border: 1px solid var(--border);
+      background: transparent; color: var(--text-dim); cursor: pointer; transition: all 0.2s ease;
+    }
+    .chart-pill:hover { border-color: var(--border-hi); color: var(--cyan); }
+    .chart-pill.active { background: var(--cyan-dim); border-color: rgba(0,200,255,0.4); color: var(--cyan); }
+
+    /* MAP */
+    .map-panel { padding: 0; overflow: hidden; border-radius: 6px; }
+    #map { height: 260px; width: 100%; }
+    [data-theme="dark"] .leaflet-tile { filter: brightness(0.4) contrast(1.2) saturate(0.6) hue-rotate(185deg); }
+    .map-overlay {
+      position: absolute; bottom: 12px; left: 12px; background: var(--panel);
+      border: 1px solid var(--border); border-radius: 3px; padding: 6px 12px;
+      font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--cyan);
+      z-index: 500; pointer-events: none; transition: background 0.4s, border-color 0.4s;
+    }
+
+    /* HISTORY */
+    .history-panel { padding: 0; overflow: hidden; }
+    .history-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 20px; border-bottom: 1px solid var(--border);
+      gap: 12px; flex-wrap: wrap; transition: border-color 0.4s;
+    }
+    .history-title {
+      font-family: 'JetBrains Mono', monospace; font-size: 9.5px;
+      letter-spacing: 0.22em; text-transform: uppercase; color: var(--text-dim);
+      display: flex; align-items: center; gap: 8px;
+    }
+    #rec-count { background: var(--cyan-dim); color: var(--cyan); font-size: 9px; padding: 2px 8px; border-radius: 2px; font-family: 'JetBrains Mono', monospace; }
+
+    .filter-row { display: flex; gap: 6px; flex-wrap: wrap; }
+    .filter-btn {
+      font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase;
+      padding: 5px 12px; border-radius: 2px; border: 1px solid var(--border);
+      background: transparent; color: var(--text-dim); cursor: pointer; transition: all 0.2s ease;
+    }
+    .filter-btn:hover { border-color: var(--border-hi); color: var(--cyan); }
+    .filter-btn.active { background: var(--cyan-dim); border-color: rgba(0,200,255,0.4); color: var(--cyan); }
+    .filter-btn.warn-btn.active { background: rgba(245,158,11,0.12); border-color: rgba(245,158,11,0.3); color: var(--amber); }
+    .filter-btn.crit-btn.active { background: rgba(239,68,68,0.12); border-color: rgba(239,68,68,0.3); color: var(--red); }
+
+    .action-btn {
+      font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase;
+      padding: 5px 12px; border-radius: 2px; border: 1px solid; cursor: pointer; transition: all 0.2s ease;
+    }
+    .export-btn { border-color: rgba(0,200,255,0.25); background: var(--cyan-dim); color: var(--cyan); }
+    .export-btn:hover { background: rgba(0,200,255,0.25); }
+    .clear-btn { border-color: rgba(239,68,68,0.25); background: rgba(239,68,68,0.08); color: var(--red); }
+    .clear-btn:hover { background: rgba(239,68,68,0.2); }
+
+    /* Secondary toolbar */
+    .history-toolbar {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 20px; border-bottom: 1px solid var(--border);
+      gap: 10px; flex-wrap: wrap; background: var(--table-alt);
+      transition: border-color 0.4s, background 0.4s;
+    }
+    .sort-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+    .sort-label { font-family: 'JetBrains Mono', monospace; font-size: 9px; color: var(--text-dim); letter-spacing: 0.12em; text-transform: uppercase; }
+    .sort-btn {
+      font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase;
+      padding: 3px 9px; border-radius: 2px; border: 1px solid var(--border);
+      background: transparent; color: var(--text-dim); cursor: pointer; transition: all 0.2s ease;
+    }
+    .sort-btn.active { background: var(--cyan-dim); border-color: rgba(0,200,255,0.35); color: var(--cyan); }
+    .sort-btn:hover { border-color: var(--border-hi); color: var(--cyan); }
+    .stats-row { display: flex; gap: 16px; flex-wrap: wrap; font-family: 'JetBrains Mono', monospace; font-size: 9.5px; color: var(--text-dim); }
+    .stats-row span strong { color: var(--text-hi); }
+
+    /* TABLE */
+    .table-wrap { overflow-y: auto; max-height: 340px; scrollbar-width: thin; scrollbar-color: var(--scrollbar) transparent; }
+    .table-wrap::-webkit-scrollbar { width: 3px; }
+    .table-wrap::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 2px; }
+
+    table { width: 100%; border-collapse: collapse; }
+    thead th {
+      position: sticky; top: 0; z-index: 2; background: var(--header-bg);
+      font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: 0.2em;
+      text-transform: uppercase; color: var(--text-dim);
+      padding: 10px 14px; text-align: left; border-bottom: 1px solid var(--border);
+      font-weight: 400; white-space: nowrap; transition: background 0.4s, color 0.2s;
+    }
+    tbody td {
+      padding: 9px 14px; font-family: 'JetBrains Mono', monospace;
+      font-size: 11.5px; color: var(--text); border-bottom: 1px solid rgba(255,255,255,0.03);
+      white-space: nowrap; transition: background 0.15s ease, color 0.4s;
+    }
+    [data-theme="light"] tbody td { border-bottom: 1px solid rgba(0,0,0,0.05); }
+    tbody tr:nth-child(even) td { background: var(--table-alt); }
+    tbody tr:hover td { background: rgba(0,200,255,0.06) !important; }
+    tbody tr.row-new td { animation: rowFlash 0.6s ease-out; }
+    @keyframes rowFlash { 0% { background: rgba(0,200,255,0.14); } 100% { background: transparent; } }
+
+    /* CONFIRM MODAL */
+    .modal-overlay {
+      position: fixed; inset: 0; z-index: 8000; background: var(--overlay-bg);
+      display: flex; align-items: center; justify-content: center;
+      opacity: 0; pointer-events: none;
+      transition: opacity 0.25s ease; backdrop-filter: blur(4px);
+    }
+    .modal-overlay.open { opacity: 1; pointer-events: all; }
+    .modal-box {
+      background: var(--modal-bg); border: 1px solid var(--border-hi); border-radius: 6px;
+      padding: 28px 32px; width: 390px; max-width: 92vw;
+      transform: scale(0.95); transition: transform 0.25s ease, background 0.4s, border-color 0.4s;
+      box-shadow: var(--shadow-soft);
+    }
+    .modal-overlay.open .modal-box { transform: scale(1); }
+    .modal-title { font-family: 'Syne', sans-serif; font-size: 1.1rem; font-weight: 700; color: var(--text-hi); margin-bottom: 10px; }
+    .modal-body { font-family: 'Space Grotesk', sans-serif; font-size: 14px; color: var(--text); line-height: 1.6; margin-bottom: 24px; }
+    .modal-body strong { color: var(--red); }
+    .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
+    .modal-btn {
+      font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase;
+      padding: 8px 18px; border-radius: 3px; cursor: pointer; transition: all 0.2s;
+    }
+    .modal-btn.cancel { border: 1px solid var(--border); background: transparent; color: var(--text-dim); }
+    .modal-btn.cancel:hover { border-color: var(--border-hi); color: var(--text); }
+    .modal-btn.confirm { border: 1px solid rgba(239,68,68,0.35); background: rgba(239,68,68,0.12); color: var(--red); }
+    .modal-btn.confirm:hover { background: rgba(239,68,68,0.22); }
+
+    /* FOOTER */
+    footer {
+      display: flex; align-items: center; justify-content: space-between;
+      padding-top: 12px; border-top: 1px solid var(--border);
+      font-family: 'JetBrains Mono', monospace; font-size: 9.5px; color: var(--text-dim); letter-spacing: 0.12em;
+      flex-wrap: wrap; gap: 8px; transition: border-color 0.4s;
+    }
+    #last-sync { color: var(--cyan); }
+
+    /* ANIMATIONS */
+    @keyframes panelIn { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+    .anim { opacity: 0; animation: panelIn 0.6s cubic-bezier(0.22,1,0.36,1) forwards; }
+    .d1 { animation-delay: 0.1s; } .d2 { animation-delay: 0.2s; }
+    .d3 { animation-delay: 0.3s; } .d4 { animation-delay: 0.4s; }
+    .d5 { animation-delay: 0.5s; } .d6 { animation-delay: 0.6s; }
+
+    .tick-up { animation: tickUp 0.3s ease-out; }
+    @keyframes tickUp { 0% { transform: translateY(4px); opacity: 0.4; } 100% { transform: none; opacity: 1; } }
+
+    .empty-row td { text-align: center; padding: 36px; color: var(--text-dim); font-size: 10px; letter-spacing: 0.15em; }
+  </style>
+</head>
+<body>
+
+  <!-- CONFIRM MODAL -->
+  <div class="modal-overlay" id="confirm-modal">
+    <div class="modal-box">
+      <div class="modal-title">⚠ Clear History</div>
+      <div class="modal-body">
+        This will <strong>permanently delete all history records</strong> from the Firebase database.
+        This action cannot be undone.
+      </div>
+      <div class="modal-actions">
+        <button class="modal-btn cancel" onclick="closeModal()">Cancel</button>
+        <button class="modal-btn confirm" onclick="confirmClear()">Delete All Records</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- BOOT -->
+  <div id="boot">
+    <div id="boot-logo">
+      Air Monitoring System
+      <span>FISAT · Environmental Command Interface</span>
+    </div>
+    <div class="boot-bar-wrap"><div id="boot-bar"></div></div>
+    <pre id="boot-log"></pre>
+  </div>
+
+  <canvas id="grid-canvas"></canvas>
+
+  <!-- APP -->
+  <div id="app">
+    <header class="anim d1">
+      <div class="logo-group">
+        <div class="logo-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="var(--cyan)" stroke-width="1.8" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="12" cy="12" r="9" stroke-opacity="0.45"/>
+            <circle cx="12" cy="12" r="2.5" fill="var(--cyan)" stroke="none"/>
+            <path d="M12 7v2M12 15v2M7 12H5M19 12h-2"/>
+            <path d="M8.5 8.5l-1-1M16.5 15.5l-1-1M15.5 8.5l1-1M8.5 15.5l1-1"/>
+          </svg>
+        </div>
+        <div>
+          <div class="logo">Air Monitoring System · <em>FISAT</em></div>
+          <div class="logo-sub">Environmental Command Interface · v2.1</div>
+        </div>
+      </div>
+      <div class="header-right">
+        <div class="datetime">
+          <div id="live-clock">--:--:--</div>
+          <div id="live-date" style="font-size:9px; margin-top:2px;">---</div>
+        </div>
+        <button class="theme-btn" id="theme-toggle" title="Toggle light/dark mode" onclick="toggleTheme()">☀</button>
+        <div class="status-pill">
+          <div class="pulse-dot" id="conn-dot"></div>
+          <span id="conn-label">OFFLINE</span>
+        </div>
+      </div>
+    </header>
+
+    <div class="main-grid">
+      <div class="left-col">
+        <!-- CO Card -->
+        <div class="panel sensor-card anim d2" id="co-card">
+          <div class="panel-corner tl"></div><div class="panel-corner tr"></div>
+          <div class="panel-corner bl"></div><div class="panel-corner br"></div>
+          <div class="sensor-ring-wrap">
+            <svg viewBox="0 0 48 48">
+              <circle class="ring-track" cx="24" cy="24" r="20"/>
+              <circle class="ring-fill" id="co-ring" cx="24" cy="24" r="20" stroke="var(--cyan)"/>
+            </svg>
+          </div>
+          <div class="panel-label">Carbon Monoxide · MQ-7</div>
+          <div class="sensor-value-row">
+            <div class="sensor-value" id="co-val" style="color: var(--cyan);">--</div>
+            <div class="sensor-unit">ppm</div>
+          </div>
+          <div class="sensor-bar-wrap"><div class="sensor-bar" id="co-bar" style="background: var(--cyan);"></div></div>
+          <div class="sensor-meta">
+            <span class="status-tag optimal" id="co-tag">STANDBY</span>
+            <span class="sensor-reading-detail">Max <strong>50</strong> · Warn@<strong>5</strong> · Crit@<strong>12</strong></span>
+          </div>
+        </div>
+
+        <!-- AQI Card -->
+        <div class="panel sensor-card anim d3" id="aqi-card">
+          <div class="panel-corner tl"></div><div class="panel-corner tr"></div>
+          <div class="panel-corner bl"></div><div class="panel-corner br"></div>
+          <div class="sensor-ring-wrap">
+            <svg viewBox="0 0 48 48">
+              <circle class="ring-track" cx="24" cy="24" r="20"/>
+              <circle class="ring-fill" id="aqi-ring" cx="24" cy="24" r="20" stroke="var(--green)"/>
+            </svg>
+          </div>
+          <div class="panel-label">Air Quality Index · MQ-135</div>
+          <div class="sensor-value-row">
+            <div class="sensor-value" id="aqi-val" style="color: var(--green);">--</div>
+            <div class="sensor-unit">AQI</div>
+          </div>
+          <div class="sensor-bar-wrap"><div class="sensor-bar" id="aqi-bar" style="background: var(--green);"></div></div>
+          <div class="sensor-meta">
+            <span class="status-tag optimal" id="aqi-tag">STANDBY</span>
+            <span class="sensor-reading-detail">Max <strong>300</strong> · Warn@<strong>50</strong> · Crit@<strong>100</strong></span>
+          </div>
+        </div>
+
+        <!-- GPS Card -->
+        <div class="panel gps-card anim d4">
+          <div class="panel-corner tl"></div><div class="panel-corner tr"></div>
+          <div class="panel-corner bl"></div><div class="panel-corner br"></div>
+          <div class="panel-label">Navigation · GPS NEO-M8N</div>
+          <div class="gps-grid">
+            <div><div class="gps-item-label">Latitude</div><div class="gps-item-value" id="gps-lat">--</div></div>
+            <div><div class="gps-item-label">Longitude</div><div class="gps-item-value" id="gps-lng">--</div></div>
+            <div><div class="gps-item-label">Altitude</div><div class="gps-item-value" id="gps-alt">--</div></div>
+            <div><div class="gps-item-label">Satellites</div><div class="gps-item-value" id="gps-sats">--</div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- CHART -->
+      <div class="panel chart-panel anim d2" style="align-self: start;">
+        <div class="panel-corner tl"></div><div class="panel-corner tr"></div>
+        <div class="panel-corner bl"></div><div class="panel-corner br"></div>
+        <div class="chart-header">
+          <div class="panel-label" style="padding:0;">Real-time Telemetry</div>
+          <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+            <div class="chart-type-pills">
+              <button class="chart-pill active" onclick="setChartType('line',this)">Line</button>
+              <button class="chart-pill" onclick="setChartType('bar',this)">Bar</button>
+            </div>
+            <div class="chart-legend">
+              <div class="legend-item"><div class="legend-dot" style="background:var(--cyan)"></div>AQI</div>
+              <div class="legend-item"><div class="legend-dot" style="background:var(--amber)"></div>CO ppm</div>
+            </div>
+          </div>
+        </div>
+        <div class="chart-wrap"><canvas id="liveChart"></canvas></div>
+      </div>
+
+      <!-- MAP -->
+      <div class="panel map-panel anim d3" style="position:relative;">
+        <div class="panel-corner tl" style="z-index:600"></div>
+        <div class="panel-corner tr" style="z-index:600"></div>
+        <div class="panel-corner bl" style="z-index:600"></div>
+        <div class="panel-corner br" style="z-index:600"></div>
+        <div id="map"></div>
+        <div class="map-overlay" id="map-coord">ACQUIRING SIGNAL…</div>
+      </div>
+    </div>
+
+    <!-- HISTORY -->
+    <div class="panel history-panel anim d5">
+      <div class="panel-corner tl"></div><div class="panel-corner tr"></div>
+      <div class="panel-corner bl"></div><div class="panel-corner br"></div>
+
+      <div class="history-header">
+        <div class="history-title">Historical Log <span id="rec-count">0 records</span></div>
+        <div style="display:flex; gap:7px; flex-wrap:wrap; align-items:center;">
+          <div class="filter-row">
+            <button class="filter-btn active" onclick="setFilter('all',this)">All</button>
+            <button class="filter-btn warn-btn" onclick="setFilter('warning',this)">⚠ Warning</button>
+            <button class="filter-btn crit-btn" onclick="setFilter('critical',this)">◈ Critical</button>
+          </div>
+          <button class="action-btn export-btn" onclick="exportCSV()">↓ Export CSV</button>
+          <button class="action-btn clear-btn" onclick="openClearModal()">✕ Clear History</button>
+        </div>
+      </div>
+
+      <!-- Sort + Stats toolbar -->
+      <div class="history-toolbar">
+        <div class="sort-row">
+          <span class="sort-label">Sort:</span>
+          <button class="sort-btn active" onclick="setSortOrder('newest',this)">Newest First</button>
+          <button class="sort-btn" onclick="setSortOrder('oldest',this)">Oldest First</button>
+          <button class="sort-btn" onclick="setSortOrder('co-hi',this)">CO ↑</button>
+          <button class="sort-btn" onclick="setSortOrder('co-lo',this)">CO ↓</button>
+          <button class="sort-btn" onclick="setSortOrder('aqi-hi',this)">AQI ↑</button>
+          <button class="sort-btn" onclick="setSortOrder('aqi-lo',this)">AQI ↓</button>
+        </div>
+        <div class="stats-row">
+          <span>Avg CO: <strong id="stat-co-avg">--</strong></span>
+          <span>Max CO: <strong id="stat-co-max">--</strong></span>
+          <span>Avg AQI: <strong id="stat-aqi-avg">--</strong></span>
+          <span>Max AQI: <strong id="stat-aqi-max">--</strong></span>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>#</th><th>Timestamp</th><th>CO (ppm)</th><th>AQI</th>
+            <th>CO Status</th><th>AQI Status</th>
+            <th>Latitude</th><th>Longitude</th><th>Altitude</th><th>Sats</th>
+          </tr></thead>
+          <tbody id="history-body">
+            <tr class="empty-row"><td colspan="10">AWAITING DATA STREAM…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <footer class="anim d6">
+      <div>© 2026 FISAT · Air Monitoring System · Environmental Command Interface</div>
+      <div>LAST SYNC <span id="last-sync">--:--:--</span></div>
+    </footer>
+  </div>
+
+  <script>
+  // ═══ 1 · BOOT ═══════════════════════════════════════════════════════════
+  const bootLines = [
+    "[ OK ] Initializing sensor array...",
+    "[ OK ] Loading Firebase RTDB client...",
+    "[ OK ] GPS module handshake (NEO-M8N)...",
+    "[ OK ] Calibrating MQ-7 · MQ-135 sensors...",
+    "[ OK ] Establishing secure data channel...",
+    "[ OK ] Air Monitoring System · FISAT ready.",
+  ];
+  const bootLog = document.getElementById('boot-log');
+  const bootBar = document.getElementById('boot-bar');
+  async function runBoot() {
+    for (let i = 0; i < bootLines.length; i++) {
+      await new Promise(r => setTimeout(r, 200 + Math.random() * 130));
+      bootLog.textContent += bootLines[i] + '\n';
+      bootBar.style.width = ((i+1)/bootLines.length*100) + '%';
+    }
+    await new Promise(r => setTimeout(r, 350));
+    document.getElementById('boot').classList.add('out');
+    setTimeout(() => {
+      document.getElementById('boot').style.display = 'none';
+      document.getElementById('app').classList.add('visible');
+    }, 900);
+  }
+  runBoot();
+
+  // ═══ 2 · THEME ══════════════════════════════════════════════════════════
+  const html = document.documentElement;
+  const themeBtn = document.getElementById('theme-toggle');
+  function toggleTheme() {
+    const isDark = html.getAttribute('data-theme') === 'dark';
+    html.setAttribute('data-theme', isDark ? 'light' : 'dark');
+    themeBtn.textContent = isDark ? '🌙' : '☀';
+    updateChartTheme();
+  }
+  function updateChartTheme() {
+    const isDark = html.getAttribute('data-theme') === 'dark';
+    const gc = isDark ? 'rgba(0,200,255,0.05)' : 'rgba(0,0,0,0.07)';
+    const tc = isDark ? '#4a6078' : '#8aabbc';
+    liveChart.options.scales.y.grid.color = gc;
+    liveChart.options.scales.y.ticks.color = tc;
+    liveChart.update('none');
+  }
+
+  // ═══ 3 · GRID BACKGROUND ════════════════════════════════════════════════
+  const gc = document.getElementById('grid-canvas');
+  const gctx = gc.getContext('2d');
+  let W, H, particles = [];
+  function resizeGrid() { W = gc.width = window.innerWidth; H = gc.height = window.innerHeight; }
+  resizeGrid(); window.addEventListener('resize', resizeGrid);
+  for (let i = 0; i < 18; i++) particles.push({ x: Math.random()*1600, y: Math.random()*900, vx: (Math.random()-.5)*.4, vy: (Math.random()-.5)*.4, r: Math.random()*1.5+.5 });
+  function drawGrid() {
+    gctx.clearRect(0,0,W,H);
+    const isDark = html.getAttribute('data-theme')==='dark';
+    gctx.strokeStyle = isDark ? 'rgba(0,200,255,0.05)' : 'rgba(0,120,180,0.06)';
+    gctx.lineWidth = 1;
+    for (let x=0; x<W; x+=60) { gctx.beginPath(); gctx.moveTo(x,0); gctx.lineTo(x,H); gctx.stroke(); }
+    for (let y=0; y<H; y+=60) { gctx.beginPath(); gctx.moveTo(0,y); gctx.lineTo(W,y); gctx.stroke(); }
+    particles.forEach(p => {
+      p.x+=p.vx; p.y+=p.vy;
+      if(p.x<0||p.x>W) p.vx*=-1; if(p.y<0||p.y>H) p.vy*=-1;
+      gctx.beginPath(); gctx.arc(p.x,p.y,p.r,0,Math.PI*2);
+      gctx.fillStyle = isDark ? 'rgba(0,200,255,0.6)' : 'rgba(0,120,180,0.4)';
+      gctx.fill();
+    });
+    particles.forEach((a,i) => particles.slice(i+1).forEach(b => {
+      const d = Math.hypot(a.x-b.x,a.y-b.y);
+      if(d<200) { gctx.beginPath(); gctx.moveTo(a.x,a.y); gctx.lineTo(b.x,b.y); gctx.strokeStyle=`rgba(0,200,255,${0.1*(1-d/200)})`; gctx.lineWidth=.5; gctx.stroke(); }
+    }));
+    requestAnimationFrame(drawGrid);
+  }
+  drawGrid();
+
+  // ═══ 4 · CLOCK ══════════════════════════════════════════════════════════
+  function updateClock() {
+    const n = new Date();
+    document.getElementById('live-clock').textContent = n.toLocaleTimeString('en-US',{hour12:false});
+    document.getElementById('live-date').textContent = n.toLocaleDateString('en-US',{weekday:'short',year:'numeric',month:'short',day:'numeric'}).toUpperCase();
+  }
+  setInterval(updateClock, 1000); updateClock();
+
+  // ═══ 5 · FIREBASE ═══════════════════════════════════════════════════════
+  const firebaseConfig = {
+    apiKey:      "AIzaSyBwMJoYiPI32kbVJYfukMXeeD_DE97sPkQ",
+    databaseURL: "https://air-monitoring-system-fisat-default-rtdb.firebaseio.com/",
+  };
+  firebase.initializeApp(firebaseConfig);
+  const db         = firebase.database();
+  const latestRef  = db.ref("sensorData/latest");
+  const historyRef = db.ref("sensorData/history");
+
+  // ═══ 6 · MAP ════════════════════════════════════════════════════════════
+  const map = L.map('map', { zoomControl:false, attributionControl:false }).setView([10.128, 76.431], 15);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+  const markerIcon = L.divIcon({
+    className: '',
+    html: `<div style="width:14px;height:14px;background:var(--cyan);border:2px solid #fff;border-radius:50%;box-shadow:0 0 12px rgba(0,200,255,0.8),0 0 0 6px rgba(0,200,255,0.15);"></div>`,
+    iconSize:[14,14], iconAnchor:[7,7]
+  });
+  const marker = L.marker([10.128, 76.431], { icon: markerIcon }).addTo(map);
+
+  // ═══ 7 · CHART ══════════════════════════════════════════════════════════
+  const ctx = document.getElementById('liveChart').getContext('2d');
+  const liveChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: [],
+      datasets: [{
+        label: 'AQI', borderColor: '#00c8ff', backgroundColor: 'rgba(0,200,255,0.07)',
+        data: [], fill: true, tension: 0.5, pointRadius: 0, borderWidth: 1.5
+      },{
+        label: 'CO ppm', borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,0.05)',
+        data: [], fill: true, tension: 0.5, pointRadius: 0, borderWidth: 1.5
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: 'rgba(6,10,16,0.95)', borderColor: 'rgba(0,200,255,0.2)', borderWidth: 1,
+          titleColor: '#4a6078', bodyColor: '#c8d8e8', padding: 10, cornerRadius: 3,
+          titleFont: { family: 'JetBrains Mono', size: 9 },
+          bodyFont:  { family: 'JetBrains Mono', size: 11 },
+          callbacks: { label: c => c.parsed.y != null ? ` ${c.dataset.label}: ${c.parsed.y.toFixed(4)}` : '' }
+        }
+      },
+      scales: {
+        y: {
+          grid: { color: 'rgba(0,200,255,0.05)' },
+          ticks: { color: '#4a6078', font: { family: 'JetBrains Mono', size: 9 }, maxTicksLimit: 6, callback: v => v.toFixed(2) }
+        },
+        x: { display: false }
+      },
+      animation: { duration: 0 }
+    }
+  });
+
+  function setChartType(type, btn) {
+    document.querySelectorAll('.chart-pill').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    // Store current data
+    const labels = [...liveChart.data.labels];
+    const d0 = [...liveChart.data.datasets[0].data];
+    const d1 = [...liveChart.data.datasets[1].data];
+    liveChart.destroy();
+    const newDs = [{
+      label:'AQI', borderColor:'#00c8ff', backgroundColor:'rgba(0,200,255,0.07)',
+      data:d0, fill:type==='line', tension:0.5, pointRadius:type==='scatter'?3:0, borderWidth:1.5,
+      ...(type==='bar'?{borderRadius:2,barPercentage:0.6}:{})
+    },{
+      label:'CO ppm', borderColor:'#f59e0b', backgroundColor:'rgba(245,158,11,0.05)',
+      data:d1, fill:type==='line', tension:0.5, pointRadius:type==='scatter'?3:0, borderWidth:1.5,
+      ...(type==='bar'?{borderRadius:2,barPercentage:0.6}:{})
+    }];
+    const nc = new Chart(ctx, {
+      type: type==='scatter'?'scatter':type,
+      data: { labels, datasets: newDs },
+      options: liveChart.options
+    });
+    Object.assign(liveChart, nc);
+  }
+
+  // ═══ 8 · LIVE DATA ══════════════════════════════════════════════════════
+  function getSeverity(v, warn, crit) {
+    if (v==null) return 'optimal';
+    return v >= crit ? 'critical' : v >= warn ? 'warning' : 'optimal';
+  }
+
+  function updateSensorCard(valEl, barEl, ringEl, tagEl, v, max, warn, crit, labels, unitColor) {
+    const sev   = getSeverity(v, warn, crit);
+    const color = sev==='critical' ? 'var(--red)' : sev==='warning' ? 'var(--amber)' : unitColor;
+    const pct   = Math.min((v||0)/max*100, 100);
+    // 4 decimal places for higher resolution
+    valEl.textContent = v != null ? v.toFixed(4) : '--';
+    valEl.style.color = color;
+    valEl.style.textShadow = `0 0 28px ${color}`;
+    valEl.classList.remove('tick-up'); void valEl.offsetWidth; valEl.classList.add('tick-up');
+    barEl.style.width = pct + '%'; barEl.style.background = color; barEl.style.boxShadow = `0 0 8px ${color}`;
+    const offset = 125.7 * (1 - pct/100);
+    ringEl.style.strokeDashoffset = offset; ringEl.style.stroke = color;
+    const lbl = sev==='critical' ? labels[2] : sev==='warning' ? labels[1] : labels[0];
+    tagEl.textContent = lbl; tagEl.className = `status-tag ${sev}`;
+  }
+
+  latestRef.on("value", snap => {
+    const d = snap.val() || {};
+    const { latitude, longitude, CO_ppm, AirQualityIndex, timestamp, altitude_m, satellites } = d;
+    document.getElementById('conn-dot').classList.add('live');
+    document.getElementById('conn-label').textContent = 'LIVE';
+
+    updateSensorCard(
+      document.getElementById('co-val'), document.getElementById('co-bar'),
+      document.getElementById('co-ring'), document.getElementById('co-tag'),
+      CO_ppm, 50, 5, 12, ['NOMINAL','WARNING','CRITICAL'], 'var(--cyan)'
+    );
+    updateSensorCard(
+      document.getElementById('aqi-val'), document.getElementById('aqi-bar'),
+      document.getElementById('aqi-ring'), document.getElementById('aqi-tag'),
+      AirQualityIndex, 300, 50, 100, ['GOOD','MODERATE','UNHEALTHY'], 'var(--green)'
+    );
+
+    // 7 decimal places for GPS (sub-metre accuracy)
+    document.getElementById('gps-lat').textContent  = latitude   != null ? latitude.toFixed(7)   : '--';
+    document.getElementById('gps-lng').textContent  = longitude  != null ? longitude.toFixed(7)  : '--';
+    document.getElementById('gps-alt').textContent  = altitude_m != null ? altitude_m.toFixed(2) + ' m' : '--';
+    document.getElementById('gps-sats').textContent = satellites ?? '--';
+
+    if (latitude && longitude) {
+      const pos = [latitude, longitude];
+      marker.setLatLng(pos); map.panTo(pos);
+      document.getElementById('map-coord').textContent = `${latitude.toFixed(7)}°N  ${longitude.toFixed(7)}°E`;
+    }
+
+    const label = new Date().toLocaleTimeString('en-US',{hour12:false});
+    liveChart.data.labels.push(label);
+    liveChart.data.datasets[0].data.push(AirQualityIndex != null ? parseFloat(AirQualityIndex.toFixed(5)) : null);
+    liveChart.data.datasets[1].data.push(CO_ppm         != null ? parseFloat(CO_ppm.toFixed(5))         : null);
+    if (liveChart.data.labels.length > 50) { liveChart.data.labels.shift(); liveChart.data.datasets.forEach(ds=>ds.data.shift()); }
+    liveChart.update('none');
+
+    if (timestamp) document.getElementById('last-sync').textContent = new Date(timestamp).toLocaleTimeString('en-US',{hour12:false});
+  });
+
+  // ═══ 9 · HISTORY ════════════════════════════════════════════════════════
+  let allRows = [], activeFilter = 'all', activeSortOrder = 'newest', firstRender = true;
+
+  historyRef.limitToLast(200).on("value", snap => {
+    const raw = snap.val();
+    if (!raw) {
+      allRows = [];
+      document.getElementById('rec-count').textContent = '0 records';
+      updateStats([]); renderTable(); firstRender = false; return;
+    }
+    allRows = Object.entries(raw).map(([k,v]) => ({key:k,...v})).sort((a,b) => (b.timestamp||0)-(a.timestamp||0));
+    document.getElementById('rec-count').textContent = allRows.length + ' records';
+    updateStats(allRows); renderTable(); firstRender = false;
+  });
+
+  function updateStats(rows) {
+    const coVals  = rows.map(r=>r.CO_ppm).filter(v=>v!=null);
+    const aqiVals = rows.map(r=>r.AirQualityIndex).filter(v=>v!=null);
+    const avg = a => a.length ? a.reduce((x,y)=>x+y,0)/a.length : null;
+    const max = a => a.length ? Math.max(...a) : null;
+    document.getElementById('stat-co-avg').textContent  = avg(coVals)  != null ? avg(coVals).toFixed(4)  + ' ppm' : '--';
+    document.getElementById('stat-co-max').textContent  = max(coVals)  != null ? max(coVals).toFixed(4)  + ' ppm' : '--';
+    document.getElementById('stat-aqi-avg').textContent = avg(aqiVals) != null ? avg(aqiVals).toFixed(4) : '--';
+    document.getElementById('stat-aqi-max').textContent = max(aqiVals) != null ? max(aqiVals).toFixed(4) : '--';
+  }
+
+  function sortRows(rows) {
+    const r = [...rows];
+    switch(activeSortOrder) {
+      case 'newest':  return r.sort((a,b)=>(b.timestamp||0)-(a.timestamp||0));
+      case 'oldest':  return r.sort((a,b)=>(a.timestamp||0)-(b.timestamp||0));
+      case 'co-hi':   return r.sort((a,b)=>(b.CO_ppm||0)-(a.CO_ppm||0));
+      case 'co-lo':   return r.sort((a,b)=>(a.CO_ppm||0)-(b.CO_ppm||0));
+      case 'aqi-hi':  return r.sort((a,b)=>(b.AirQualityIndex||0)-(a.AirQualityIndex||0));
+      case 'aqi-lo':  return r.sort((a,b)=>(a.AirQualityIndex||0)-(b.AirQualityIndex||0));
+      default: return r;
+    }
+  }
+
+  function badgeHTML(v, warn, crit, labels) {
+    const s = getSeverity(v,warn,crit);
+    const lbl = s==='critical'?labels[2]:s==='warning'?labels[1]:labels[0];
+    return `<span class="status-tag ${s}" style="font-size:8px;padding:2px 8px;">${lbl}</span>`;
+  }
+
+  function renderTable() {
+    const tbody = document.getElementById('history-body');
+    let rows = [...allRows];
+    if (activeFilter !== 'all') {
+      rows = rows.filter(r => {
+        const a=getSeverity(r.CO_ppm,5,12), b=getSeverity(r.AirQualityIndex,50,100);
+        const w=[a,b].includes('critical')?'critical':[a,b].includes('warning')?'warning':'optimal';
+        return w === activeFilter;
+      });
+    }
+    rows = sortRows(rows);
+    if (!rows.length) { tbody.innerHTML=`<tr class="empty-row"><td colspan="10">NO RECORDS MATCH FILTER.</td></tr>`; return; }
+
+    tbody.innerHTML = rows.map((r,i) => {
+      const ts  = r.timestamp ? new Date(r.timestamp).toLocaleString('en-US',{hour12:false}) : '--';
+      const co  = r.CO_ppm          != null ? r.CO_ppm.toFixed(5)          : '--';
+      const aq  = r.AirQualityIndex != null ? r.AirQualityIndex.toFixed(5)  : '--';
+      const lat = r.latitude        != null ? r.latitude.toFixed(7)         : '--';
+      const lng = r.longitude       != null ? r.longitude.toFixed(7)        : '--';
+      const alt = r.altitude_m      != null ? r.altitude_m.toFixed(2)+' m'  : '--';
+      const sat = r.satellites ?? '--';
+      const coC = r.CO_ppm>=12?'var(--red)':r.CO_ppm>=5?'var(--amber)':'var(--green)';
+      const aqC = r.AirQualityIndex>=100?'var(--red)':r.AirQualityIndex>=50?'var(--amber)':'var(--green)';
+      const nr  = !firstRender && i===0 ? 'row-new' : '';
+      return `<tr class="${nr}">
+        <td style="color:var(--text-dim)">${i+1}</td>
+        <td style="color:var(--text-dim)">${ts}</td>
+        <td style="color:${coC};font-weight:700">${co}</td>
+        <td style="color:${aqC};font-weight:700">${aq}</td>
+        <td>${badgeHTML(r.CO_ppm,5,12,['NOMINAL','WARNING','CRITICAL'])}</td>
+        <td>${badgeHTML(r.AirQualityIndex,50,100,['GOOD','MODERATE','UNHEALTHY'])}</td>
+        <td style="color:var(--text-dim)">${lat}</td>
+        <td style="color:var(--text-dim)">${lng}</td>
+        <td style="color:var(--text-dim)">${alt}</td>
+        <td style="color:var(--text-dim)">${sat}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  function setFilter(f, btn) { activeFilter=f; document.querySelectorAll('.filter-btn').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); renderTable(); }
+  function setSortOrder(o, btn) { activeSortOrder=o; document.querySelectorAll('.sort-btn').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); renderTable(); }
+
+  // CLEAR HISTORY
+  function openClearModal() { document.getElementById('confirm-modal').classList.add('open'); }
+  function closeModal() { document.getElementById('confirm-modal').classList.remove('open'); }
+  function confirmClear() {
+    closeModal();
+    historyRef.remove().then(() => {
+      allRows = [];
+      document.getElementById('rec-count').textContent = '0 records';
+      updateStats([]);
+      document.getElementById('history-body').innerHTML = `<tr class="empty-row"><td colspan="10">HISTORY CLEARED SUCCESSFULLY.</td></tr>`;
+    }).catch(err => alert('Error clearing history: ' + err.message));
+  }
+
+  // EXPORT CSV
+  function exportCSV() {
+    const h = ['#','Timestamp','CO_ppm','AirQualityIndex','Latitude','Longitude','Altitude_m','Satellites'];
+    const rows = allRows.map((r,i) => [
+      i+1,
+      r.timestamp ? new Date(r.timestamp).toISOString() : '',
+      r.CO_ppm          != null ? r.CO_ppm.toFixed(6)          : '',
+      r.AirQualityIndex != null ? r.AirQualityIndex.toFixed(6)  : '',
+      r.latitude        != null ? r.latitude.toFixed(7)         : '',
+      r.longitude       != null ? r.longitude.toFixed(7)        : '',
+      r.altitude_m      != null ? r.altitude_m.toFixed(3)       : '',
+      r.satellites ?? ''
+    ]);
+    const csv = [h,...rows].map(r=>r.join(',')).join('\n');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+    a.download = `AMS_FISAT_${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+  }
+  </script>
+</body>
+</html>
