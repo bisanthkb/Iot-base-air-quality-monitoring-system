@@ -1,0 +1,204 @@
+#include <Arduino.h>
+#include <WiFi.h>
+#include <Firebase_ESP_Client.h>
+#include <TinyGPS++.h>
+#include <MQUnifiedsensor.h>
+
+// Firebase Addons
+#include <addons/TokenHelper.h>
+#include <addons/RTDBHelper.h>
+
+/*********** WiFi & Firebase Credentials ***********/
+#define WIFI_SSID "OnePlus 12R"
+#define WIFI_PASSWORD "11223344"
+#define API_KEY "AIzaSyBwMJoYiPI32kbVJYfukMXeeD_DE97sPkQ"
+#define USER_EMAIL "bisanth12@gmail.com"
+#define USER_PASSWORD "abc123"
+#define DATABASE_URL "https://air-monitoring-system-fisat-default-rtdb.firebaseio.com"
+
+/*********** GPS Configuration ***********/
+HardwareSerial GPSSerial(2);
+TinyGPSPlus gps;
+
+/*********** MQ Sensors ***********/
+#define MQ7_PIN 34
+#define MQ135_PIN 35
+
+MQUnifiedsensor mq7("ESP32", 3.3, 12, MQ7_PIN, "MQ-7");
+MQUnifiedsensor mq135("ESP32", 3.3, 12, MQ135_PIN, "MQ-135");
+
+/*********** Firebase Objects ***********/
+FirebaseData firebaseData;
+FirebaseData firebaseHistoryData;   // Separate stream object for history push
+FirebaseAuth auth;
+FirebaseConfig config;
+
+unsigned long lastSend = 0;
+const unsigned long sendInterval = 15000;  // 15 seconds
+
+// Debug helpers
+unsigned long lastGPSPrint = 0;
+const unsigned long gpsPrintInterval = 5000;
+
+/***
+ * History pruning: keep only the latest MAX_HISTORY_ENTRIES in the database.
+ * Firebase RTDB doesn't have built-in TTL, so we count pushed children and
+ * delete the oldest ones once the cap is exceeded.
+ ***/
+const int MAX_HISTORY_ENTRIES = 500;
+int historyCount = 0;  // rough in-memory counter; resets on reboot
+
+void setup() {
+  Serial.begin(115200);
+  delay(100);
+
+  Serial.println("\nAir Monitoring System Starting...");
+
+  // 1. Initialize GPS
+  GPSSerial.begin(9600, SERIAL_8N1, 16, 17);
+  Serial.println("GPS Serial started on Pins 16(RX)/17(TX)");
+
+  // 2. Connect to WiFi
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  Serial.print("Connecting to WiFi");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\nWiFi Connected → IP: " + WiFi.localIP().toString());
+
+  // 3. MQ-7 & MQ-135 Setup
+  mq7.setRegressionMethod(1);     // Exponential: PPM = a * ratio^b
+  mq7.setA(99.042);
+  mq7.setB(-1.518);
+
+  mq135.setRegressionMethod(1);
+  mq135.setA(110.47);
+  mq135.setB(-2.862);
+
+  mq7.init();
+  mq135.init();
+
+  Serial.print("Calibrating sensors (assuming clean air)... ");
+  float r0_7 = 0, r0_135 = 0;
+  const int calibSamples = 20;
+  
+  for (int i = 0; i < calibSamples; i++) {
+    mq7.update();
+    mq135.update();
+    r0_7   += mq7.calibrate(27.5);    // MQ-7 typical clean air Rs/R0
+    r0_135 += mq135.calibrate(3.6);   // MQ-135 typical
+    delay(50);
+  }
+  
+  mq7.setR0(r0_7 / calibSamples);
+  mq135.setR0(r0_135 / calibSamples);
+  
+  Serial.printf("Done → MQ-7 R0=%.2f | MQ-135 R0=%.2f\n", 
+                mq7.getR0(), mq135.getR0());
+
+  // 4. Firebase Initialization
+  config.api_key = API_KEY;
+  auth.user.email = USER_EMAIL;
+  auth.user.password = USER_PASSWORD;
+  config.database_url = DATABASE_URL;
+  config.token_status_callback = tokenStatusCallback;
+  Firebase.reconnectWiFi(true);
+
+  Firebase.begin(&config, &auth);
+
+  // Wait for Firebase to be ready (max 10s)
+  unsigned long fbWait = millis();
+  while (!Firebase.ready() && millis() - fbWait < 10000) {
+    delay(200);
+    Serial.print(".");
+  }
+
+  if (Firebase.ready()) {
+    Serial.println("\nFirebase connected successfully");
+  } else {
+    Serial.println("\nFirebase init timed out — will retry in loop");
+  }
+
+  Serial.println("Setup complete.\n");
+}
+
+void loop() {
+  // Feed GPS continuously
+  while (GPSSerial.available() > 0) {
+    gps.encode(GPSSerial.read());
+  }
+
+  // Periodic GPS status print
+  if (millis() - lastGPSPrint >= gpsPrintInterval) {
+    lastGPSPrint = millis();
+    if (gps.location.isValid()) {
+      Serial.printf("GPS Fix → Lat: %.6f  Lng: %.6f  Sats: %d  Alt: %.1fm\n",
+                    gps.location.lat(), gps.location.lng(),
+                    gps.satellites.value(), gps.altitude.meters());
+    } else {
+      Serial.printf("No GPS fix yet... (chars processed: %lu)\n", gps.charsProcessed());
+    }
+  }
+
+  // Send data every sendInterval milliseconds
+  if (millis() - lastSend >= sendInterval) {
+    lastSend = millis();
+
+    if (!Firebase.ready()) {
+      Serial.println("Firebase not ready, skipping cycle.");
+      return;
+    }
+
+    // ── Read sensors ───────────────────────────────────────────────────────
+    mq7.update();
+    float co = mq7.readSensor();
+
+    mq135.update();
+    float air = mq135.readSensor();
+
+    bool hasGPS    = gps.location.isValid();
+    bool hasSensor = (!isnan(co) && co >= 0) || (!isnan(air) && air >= 0);
+
+    if (!hasSensor && !hasGPS) {
+      Serial.println("No valid sensor data this cycle — skipping.");
+      return;
+    }
+
+    // ── Build JSON payload ─────────────────────────────────────────────────
+    FirebaseJson json;
+
+    // Server-side timestamp (ms since epoch) — Firebase fills this in
+    json.set("timestamp/.sv", "timestamp");
+
+    if (hasGPS) {
+      json.set("latitude",    gps.location.lat());
+      json.set("longitude",   gps.location.lng());
+      json.set("altitude_m",  gps.altitude.meters());
+      json.set("satellites",  (int)gps.satellites.value());
+    }
+
+    if (!isnan(co)  && co  >= 0) json.set("CO_ppm",          co);
+    if (!isnan(air) && air >= 0) json.set("AirQualityIndex",  air);
+
+    // ── 1. Overwrite "latest" node ─────────────────────────────────────────
+    if (Firebase.RTDB.setJSON(&firebaseData, "/sensorData/latest", &json)) {
+      Serial.println("✔ latest updated");
+    } else {
+      Serial.println("✘ latest failed: " + firebaseData.errorReason());
+    }
+
+    // ── 2. Push to "history" (auto-key = chronological, queryable) ─────────
+    //   Each push creates a unique child key under /sensorData/history/
+    //   The dashboard queries .limitToLast(100) so only recent rows appear.
+    if (Firebase.RTDB.pushJSON(&firebaseHistoryData, "/sensorData/history", &json)) {
+      historyCount++;
+      Serial.printf("✔ history pushed (local count: %d)\n", historyCount);
+    } else {
+      Serial.println("✘ history push failed: " + firebaseHistoryData.errorReason());
+    }
+
+    Serial.printf("   CO=%.2f ppm  AQI=%.1f  GPS=%s\n",
+                  co, air, hasGPS ? "OK" : "NO FIX");
+  }
+}
